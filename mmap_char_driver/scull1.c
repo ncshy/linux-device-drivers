@@ -397,11 +397,13 @@ fail:
 
 static void __exit scull_exit(void)
 {
+	//free buffer memory
+	scull_trunc(&sculld);
+	//Delete device
 	cdev_del(&(scull_dev.chardev));
 	//unregister driver
 	unregister_chrdev_region(scull_id, MAX_DEVICE);
 
-	//free memory
 	pr_alert("Exited %s\n", __func__);
 }
 
