@@ -11,6 +11,8 @@
 #include <linux/jiffies.h>
 #include <linux/param.h>
 
+#define CONFIG_TIMEOUT
+
 MODULE_LICENSE("GPL");
 
 static unsigned int buflen = 10;
@@ -47,18 +49,24 @@ static ssize_t scullb_read(struct file *filp, char __user *ubuf, size_t bytes, l
 	ret = down_interruptible(&scullb.sem);
 	if (ret < 0)
 		return ret;
+	/* Read sleeps if buffer is empty */
 	while (scullb.wp == scullb.rp) {         /* Buffer empty */
 		up(&scullb.sem);
 		if ((filp->f_flags & O_NONBLOCK) == O_NONBLOCK)
 			return -EAGAIN;
 
-		/* Setting timeout to 10seconds, on x86 HZ is 100 */
+		/* Setting timeout to 10seconds, on x86 'HZ' is 100/250(?) */
+		#ifdef CONFIG_TIMEOUT
 		timeout = (HZ * 10);
 		ret = wait_event_interruptible_timeout(scullb.inq, scullb.wp != scullb.rp, timeout);
+		#else
+		ret = wait_event_interruptible(scullb.inq, scullb.wp != scullb.rp);
+		#endif
 		if (ret < 0)
 			return ret;
-		pr_info("timeout is :%lu\n", timeout);
-		pr_info("time remaining : %d\n", ret);
+		#ifdef CONFIG_TIMEOUT
+		pr_info("timeout is %lu\n", timeout);
+		#endif
 		if (down_interruptible(&scullb.sem) < 0)
 			return -ERESTARTSYS;
 	}
@@ -100,21 +108,24 @@ static ssize_t scullb_write(struct file *filp, const char __user *ubuf, size_t b
 	ret = down_interruptible(&scullb.sem);
 	if (ret < 0)
 		return ret;
+	/* Write sleeps if buffer is full */	
 	while ((scullb.wp + 1) % scullb.buflen == scullb.rp) {             /* Buffer full */
 		up(&scullb.sem);
 		if ((filp->f_flags & O_NONBLOCK) == O_NONBLOCK)
 			return -EAGAIN;
 
+		#ifdef CONFIG_TIMEOUT
 		ret = wait_event_interruptible_timeout(scullb.outq, ((scullb.wp + 1) % scullb.buflen) != scullb.rp, timeout);
+		#else
+		ret = wait_event_interruptible(scullb.outq, ((scullb.wp + 1) % scullb.buflen) != scullb.rp);
+		#endif
 		if (ret < 0)
 			return ret;
 		if (down_interruptible(&scullb.sem) < 0)
 			return -ERESTARTSYS;
 	}
-	if (scullb.wp == scullb.buflen - 1)
-		scullb.wp = 0;
-
-	/* scull.buflen is the max number of bytes, so indexing requires a -1 */
+	
+	/* Find the correct size dependent on bytes, rp and wp, end of buffer */
 	if (scullb.wp  < scullb.rp) {
 		bytes2write = scullb.rp - scullb.wp - 1;
 		bytes2write = (bytes2write < bytes) ? bytes2write : bytes;
