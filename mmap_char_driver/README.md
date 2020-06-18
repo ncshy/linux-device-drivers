@@ -1,4 +1,4 @@
-#mmap_char_driver
+# mmap_char_driver
 
 Character driver that registers a device to the kernel using standard `cdev`.  
 
@@ -6,7 +6,7 @@ Supports `non-blocking IO`.
 
 On every write syscall invocation, device memory is cleared, freed and reallocated.  
 
-ioctl code is defined in scull.h  
+ioctl macros are defined in scull.h  
 
 The `SCULL_MAGIC` was obtained from an unused MAGIC number.  
 
@@ -23,7 +23,7 @@ If defined with MAP_SHARED, the user change is reflected.
 
 Note, in this example, a kernel memory is being exposed to the userspace which is a big security risk in real scenarios.  
 Its ok for this pedagogic purpose however.  
-Normally mmap is used for mapping file blocks into memory and peripheral registers, video buffers to userspace.  
+Normally mmap is used for mapping file blocks or peripheral registers and video buffers into userspace memory.  
 
-mmap() is also used instead of brk() with MAP_ANONYMOUS settings, since there is no backing file. I think its used for dynamic memory requests of 128KB and larger.
+mmap() is also used instead of brk() with MAP_ANONYMOUS settings by malloc. I think its used for dynamic memory requests of 128KB and larger.
 
