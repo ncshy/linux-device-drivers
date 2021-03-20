@@ -1,10 +1,11 @@
 Network Driver implementation based on Linux Device Drivers 3rd Edition.
 
-#Installation
+# Installation
+
 The driver(ldd\_nw.ko) is compiled for Kernel 5.4.70 running on a BCM2837 SoC(Rpi 3).
 As a result, it had to be cross-compiled for the ARM architecture. 
 
-#Working
+# Working
 
 The Network device driver, tells the kernel to associate 2 device interfaces(ldd0 and ldd1) that the driver will control.
 
@@ -24,7 +25,7 @@ As a result, the packet becomes of the form src:dst = 192.168.3.2: 192.168.3.1 .
 The receiving device as part of its interrupt handling reads the packet from system memory and sends it up to the kernel for processing. As can be seen, the modified packet simulates an incoming packet to the receiving device.  
 Each device has a private memory associated with it, this was crucial to simulate status registers, store modified packets, maintain transmission statistics etc. The private memory is 'struct snull\_priv'. It also has a spinlock embedded within it to serialize access to this structure. 
 
-#Interesting findings from running the driver
+# Interesting findings from running the driver
 
 1) tcpdump and other packet sniffers, obtain their packet from the wire. But what is the wire? It sounds like the physical medium, but in reality the receive a copy of a packet at the boundary point of the Kernel Network stack and the device driver. 
 This was shown to be the case, since the driver mangles the SRC,DST ip addresses of the packets(as mentioned earlier), yet the tcpdump for the transmitting interface showed the pre-mangled IP values. 
