@@ -21,9 +21,9 @@ If defined with MAP_PRIVATE, then user changes are not flushed to the physical m
 If defined with MAP_SHARED, the user change is reflected.  
 ```
 
-Note, in this example, a kernel memory is being exposed to the userspace which is a big security risk in real scenarios.  
+Note, in this example, instead of a device memory being exposed to the userspace, a kernel low memory is exposed, which is a big security risk in real scenarios.  
 Its ok for this pedagogic purpose however.  
-Normally mmap is used for mapping file blocks or peripheral registers and video buffers into userspace memory.  
+Normally mmap() is used for mapping file blocks or peripheral registers and video buffers into userspace memory.  
 
 mmap() is also used instead of brk() with MAP_ANONYMOUS settings by malloc. I think its used for dynamic memory requests of 128KB and larger.
 
