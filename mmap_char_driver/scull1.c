@@ -310,17 +310,20 @@ static int scull_mmap(struct file *filp, struct vm_area_struct *vma)
 	struct scull_device *sculld = filp->private_data;
 
 	pr_info("Inside mmap call\n");
+	/* Obtain physical page frame of the buffer */
 	physaddr = __pa(sculld->qset_hd->data[0]);
 	pfn = physaddr >> PAGE_SHIFT;
 	pr_info("virt_addr: %lx; physaddr: %lx; pfn : %lu\n", (unsigned long)sculld->qset_hd->data, physaddr, pfn);
 	pr_info("data[0] is %c\n", ((char *)sculld->qset_hd->data[0])[0]);
-
+	
+	/* Create the page table mapping, heavy work done by kernel */
 	ret = remap_pfn_range(vma, vma->vm_start, pfn, vma->vm_end - vma->vm_start, vma->vm_page_prot);
 	if (ret < 0)
 		return ret;
 
-
+	/* Register vma_ops */
 	vma->vm_ops = &scull_vma_ops;
+	/* On the first access of VMA, mmap is called, so forcing a call to open */
 	scull_vma_open(vma);
 
 	return 0;
