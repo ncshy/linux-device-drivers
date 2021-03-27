@@ -30,6 +30,7 @@ struct scull_device {
 	/* Data buffer */
 	char *buf;
 	unsigned int buflen;
+    /* Lock to handle serialization */
 	struct semaphore sem;
 } scullb;
 /*
@@ -41,6 +42,7 @@ static ssize_t scullb_read(struct file *filp, char __user *ubuf, size_t bytes, l
 	int ret;
 	int bytes2read;
 	int bytesread;
+    int bytes_remaining;
 	unsigned long timeout;
 
 	pr_info("%s entre %d\n", __func__, scullb.wp);
@@ -67,6 +69,7 @@ static ssize_t scullb_read(struct file *filp, char __user *ubuf, size_t bytes, l
 		#ifdef CONFIG_TIMEOUT
 		pr_info("timeout is %lu\n", timeout);
 		#endif
+        /* Obtain semaphore and fall through */
 		if (down_interruptible(&scullb.sem) < 0)
 			return -ERESTARTSYS;
 	}
@@ -74,24 +77,26 @@ static ssize_t scullb_read(struct file *filp, char __user *ubuf, size_t bytes, l
 	if (scullb.wp > scullb.rp) {
 		bytes2read = scullb.wp - scullb.rp;
 		bytes2read = (bytes2read < bytes) ? bytes2read : bytes;
-		bytesread = copy_to_user(ubuf, &scullb.buf[scullb.rp], bytes2read);
+		bytes_remaining = copy_to_user(ubuf, &scullb.buf[scullb.rp], bytes2read);
 	} else {
 		bytes2read = bytes;
 		if (bytes2read > (scullb.buflen - scullb.rp)) {
 			bytes2read = scullb.buflen - scullb.rp;
-			bytesread = copy_to_user(ubuf, &scullb.buf[scullb.rp], bytes2read);
+			bytes_remaining = copy_to_user(ubuf, &scullb.buf[scullb.rp], bytes2read);
 		} else {
-			bytesread = copy_to_user(ubuf, &scullb.buf[scullb.rp], bytes2read);
+			bytes_remaining = copy_to_user(ubuf, &scullb.buf[scullb.rp], bytes2read);
 		}
 	}
-	scullb.rp = (scullb.rp + (bytes2read - bytesread)) % scullb.buflen;
+    bytesread = bytes2read - bytes_remaining;
+	scullb.rp = (scullb.rp + bytesread) % scullb.buflen;
 	up(&scullb.sem);
 
+    /* Wake up any blocked write operations */
 	/* I believe wakeup_interruptible can be scheduled out before call completes */
 	wake_up_interruptible(&scullb.outq);
 	pr_info("%s extre %d\n", __func__, scullb.wp);
 	pr_info("%s extre %d\n", __func__, scullb.rp);
-	return bytes - bytesread;
+	return bytesread;
 }
 
 static ssize_t scullb_write(struct file *filp, const char __user *ubuf, size_t bytes, loff_t *loff)
@@ -99,6 +104,7 @@ static ssize_t scullb_write(struct file *filp, const char __user *ubuf, size_t b
 	int ret;
 	int bytes2write;
 	int byteswritten;
+	int bytes_remaining;
 	unsigned long timeout;
 
 	timeout = HZ * 10;
@@ -108,9 +114,10 @@ static ssize_t scullb_write(struct file *filp, const char __user *ubuf, size_t b
 	ret = down_interruptible(&scullb.sem);
 	if (ret < 0)
 		return ret;
-	/* Write sleeps if buffer is full */	
+	/* Add write op to waitqueue and sleep if buffer is full */	
 	while ((scullb.wp + 1) % scullb.buflen == scullb.rp) {             /* Buffer full */
 		up(&scullb.sem);
+        /* Check if NONBLOCK flag is set */
 		if ((filp->f_flags & O_NONBLOCK) == O_NONBLOCK)
 			return -EAGAIN;
 
@@ -121,6 +128,7 @@ static ssize_t scullb_write(struct file *filp, const char __user *ubuf, size_t b
 		#endif
 		if (ret < 0)
 			return ret;
+        /* Acquire semaphore and fall through */
 		if (down_interruptible(&scullb.sem) < 0)
 			return -ERESTARTSYS;
 	}
@@ -129,24 +137,26 @@ static ssize_t scullb_write(struct file *filp, const char __user *ubuf, size_t b
 	if (scullb.wp  < scullb.rp) {
 		bytes2write = scullb.rp - scullb.wp - 1;
 		bytes2write = (bytes2write < bytes) ? bytes2write : bytes;
-		byteswritten = copy_from_user(&scullb.buf[scullb.wp], ubuf, bytes2write);
+		bytes_remaining = copy_from_user(&scullb.buf[scullb.wp], ubuf, bytes2write);
 
 	} else {
 		bytes2write = bytes;
 		if (bytes2write > (scullb.buflen - scullb.wp)) {
 			bytes2write = scullb.buflen - scullb.wp - 1;
-			byteswritten = copy_from_user(&scullb.buf[scullb.wp], ubuf, bytes2write);
+			bytes_remaining = copy_from_user(&scullb.buf[scullb.wp], ubuf, bytes2write);
 		} else {
-			byteswritten = copy_from_user(&scullb.buf[scullb.wp], ubuf, bytes2write);
+			bytes_remaining = copy_from_user(&scullb.buf[scullb.wp], ubuf, bytes2write);
 		}
 	}
-	scullb.wp = (scullb.wp + (bytes2write - byteswritten)) % scullb.buflen;
+    byteswritten = bytes2write - bytes_remaining;
+	scullb.wp = (scullb.wp + byteswritten) % scullb.buflen;
 	up(&scullb.sem);
 
+    /* Wake up any blocked read operations */
 	wake_up_interruptible(&scullb.inq);
 	pr_info("%s extre %d\n", __func__, scullb.wp);
 	pr_info("%s extre %d\n", __func__, scullb.rp);
-	return bytes2write - byteswritten;
+	return byteswritten;
 }
 
 static int scullb_close(struct inode *inode, struct file *filp)
@@ -166,9 +176,9 @@ static int __init init_world(void)
 	int ret;
 
 	pr_info("init sleep driver\n");
+    /* Register 2 blocking queues for input and output */
 	init_waitqueue_head(&scullb.inq);
 	init_waitqueue_head(&scullb.outq);
-	pr_info("init waitqueue head\n");
 
 	scullb.buflen = buflen;
 	/* Request memory for circ buffer */
@@ -190,11 +200,13 @@ static int __init init_world(void)
 	scullb.miscd.fops = &scullb_fops;
 	ret = misc_register(&scullb.miscd);
 	if (ret < 0)
-		return ret;
-
-	pr_info("init miscellaneous dev\n");
+		goto register_err;
 
 	return 0;
+
+register_err:
+    kfree(scullb.buf);
+    return -1
 }
 
 static void __exit exit_world(void)
